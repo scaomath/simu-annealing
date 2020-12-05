@@ -74,57 +74,68 @@ class Net(nn.Module):
 
 
 
-def conv_block(in_channels, out_channels, stride=1):
+def conv_block(in_channels, out_channels, stride=1, padding=3):
     return nn.Conv2d(in_channels, out_channels, kernel_size=3,
-                    stride=stride, padding=1, bias=False)
+                    stride=stride, padding=padding, bias=False)
 
 
 # Residual block
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+    def __init__(self, in_channels, out_channels, 
+                 stride=1, padding=1, downsample=None, debug=False):
         super(ResidualBlock, self).__init__()
-        self.conv1 = conv_block(in_channels, out_channels, stride)
+        self.conv1 = conv_block(in_channels, out_channels, stride=stride, padding=padding)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv_block(out_channels, out_channels)
+        self.conv2 = conv_block(out_channels, out_channels, padding=padding)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.downsample = downsample
+        self.debug = debug
 
     def forward(self, x):
         residual = x
+        if self.debug: print(f"\n     Original shape: {x.shape}")
+
         out = self.conv1(x)
+        if self.debug: print(f"\nConv2d #1 out shape: {out.shape}")
+
         out = self.bn1(out)
         out = self.relu(out)
         out = self.conv2(out)
+        if self.debug: print(f"\nConv2d #2 out shape: {out.shape}")
+
         out = self.bn2(out)
         if self.downsample:
             residual = self.downsample(x)
+            if self.debug: print(f"\n   Downsampled shape: {residual.shape}")
+
         out += residual
         out = self.relu(out)
         return out
 
 # ResNet
 class ResNet(nn.Module):
-    def __init__(self, block, layers, num_classes=10):
+    def __init__(self, block, layers, num_classes=10, debug=False):
         super(ResNet, self).__init__()
         self.in_channels = 16
         self.conv = conv_block(1, 16)
         self.bn = nn.BatchNorm2d(16)
         self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self.make_layer(block, 16, layers[0])
+        self.layer1 = self.make_layer(block, 16, layers[0], 1)
         self.layer2 = self.make_layer(block, 32, layers[0], 2)
         self.layer3 = self.make_layer(block, 64, layers[1], 2)
         self.avg_pool = nn.AvgPool2d(8)
         self.fc = nn.Linear(64, num_classes)
+        self.debug = debug
 
-    def make_layer(self, block, out_channels, blocks, stride=1):
+    def make_layer(self, block, out_channels, blocks, stride=1, padding=1):
         downsample = None
         if (stride != 1) or (self.in_channels != out_channels):
             downsample = nn.Sequential(
-                conv_block(self.in_channels, out_channels, stride=stride),
+                conv_block(self.in_channels, out_channels, stride=stride, padding=padding),
                 nn.BatchNorm2d(out_channels))
         layers = []
-        layers.append(block(self.in_channels, out_channels, stride, downsample))
+        layers.append(block(self.in_channels, out_channels, stride, padding, downsample))
         self.in_channels = out_channels
         for i in range(1, blocks):
             layers.append(block(out_channels, out_channels))
@@ -134,9 +145,16 @@ class ResNet(nn.Module):
         out = self.conv(x)
         out = self.bn(out)
         out = self.layer1(out)
+        if self.debug: print(f"\nLayer 1 out shape: {out.shape}")
+       
         out = self.layer2(out)
+        if self.debug: print(f"\nLayer 2 out shape: {out.shape}")
+
         out = self.layer3(out)
+        if self.debug: print(f"\nLayer 2 out shape: {out.shape}")
+
         out = self.avg_pool(out)
+        # print(out.shape)
         out = out.view(out.size(0), -1)
         out = self.fc(out)
         return F.log_softmax(out)
@@ -301,7 +319,13 @@ if __name__ == "__main__":
                     desc += f"Batch Loss Train: {loss.item():.4f}     " 
                     pbar.set_description(desc)
                     pbar.update(args['log_interval'])
-    print("Done training.")
+                elif  batch_idx==len(train_loader)-1:
+                    desc = f"Epoch [{epoch}/{args['epochs']}]     "
+                    desc += f"[Steps {len(train_loader.dataset)} / {len(train_loader.dataset)}]    "
+                    desc += f"Batch Loss Train: {loss.item():.4f}     " 
+                    pbar.set_description(desc)
+                    pbar.update(args['log_interval'])
+    print("\nDone training.")
 
     for data, target in test_loader:
         data, target = data.cuda(), target.cuda()
